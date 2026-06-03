@@ -40,6 +40,54 @@ torch::Tensor fused_logp_forward_online_indexed_fp32(
     torch::Tensor row_indices);
 #endif
 
+
+// Prefix-Shared Attention Declarations & Wrappers
+#if defined(__CUDACC__) || defined(KERNEL_ALIGN_WITH_CUDA)
+
+void prefix_shared_attention_forward(
+  const nv_bfloat16 *Q,  // [bs, G, len_q, DIM]
+  const nv_bfloat16 *K,  // [bs, len_kv, DIM]
+  const nv_bfloat16 *V,  // [bs, len_kv, DIM]
+  nv_bfloat16 *O,        // [bs, G, len_q, DIM]
+  int bs,
+  int G,
+  int len_q,
+  int len_kv,
+  int dim);
+
+at::Tensor prefix_shared_attention(
+  const at::Tensor& Q, 
+  const at::Tensor& K, 
+  const at::Tensor& V) 
+{
+  TORCH_CHECK(Q.dim() == 4, "Q must be [bs, G, len_q, DIM]");
+  TORCH_CHECK(K.dim() == 3, "K must be [bs, len_kv, DIM]");
+  TORCH_CHECK(V.dim() == 3, "V must be [bs, len_kv, DIM]");
+  
+  TORCH_CHECK(Q.dtype() == torch::kBFloat16, "Only BFloat16 is supported");
+  TORCH_CHECK(Q.is_cuda() && Q.is_contiguous(), "Tensors must be CUDA and contiguous");
+  TORCH_CHECK(K.is_cuda() && K.is_contiguous(), "Tensors must be CUDA and contiguous");
+  TORCH_CHECK(V.is_cuda() && V.is_contiguous(), "Tensors must be CUDA and contiguous");
+
+  const int bs = Q.size(0);
+  const int G = Q.size(1);
+  const int len_q = Q.size(2);
+  const int dim = Q.size(3);
+  const int len_kv = K.size(1);
+
+  at::Tensor O = at::empty_like(Q);
+
+  auto Q_ptr = reinterpret_cast<const nv_bfloat16 *>(Q.data_ptr());
+  auto K_ptr = reinterpret_cast<const nv_bfloat16 *>(K.data_ptr());
+  auto V_ptr = reinterpret_cast<const nv_bfloat16 *>(V.data_ptr());
+  auto O_ptr = reinterpret_cast<nv_bfloat16 *>(O.data_ptr());
+
+  prefix_shared_attention_forward(Q_ptr, K_ptr, V_ptr, O_ptr, bs, G, len_q, len_kv, dim);
+
+  return O;
+}
+#endif
+
 PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
     m.doc() = "RL-Kernel High-Performance Operator Extension Library";
 
@@ -76,5 +124,9 @@ PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
         "fused_logp_forward_online_indexed_fp32",
         &fused_logp_forward_online_indexed_fp32,
         "Fused logp online indexed fp32");
+    m.def(
+        "prefix_shared_attention", 
+        &prefix_shared_attention, 
+        "Prefix-Shared Fused Attention for GRPO");
 #endif
 }
