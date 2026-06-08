@@ -55,9 +55,9 @@ def test_flashinfer_temperature_applied_once(monkeypatch):
     sampler.sample(logits, top_p=0.9, temperature=temperature)
 
     expected = torch.softmax(logits.float() / temperature, dim=-1)
-    assert torch.allclose(capture["probs"], expected, atol=1e-6), (
-        "FlashInfer path must apply temperature exactly once (got T**2 scaling)"
-    )
+    assert torch.allclose(
+        capture["probs"], expected, atol=1e-6
+    ), "FlashInfer path must apply temperature exactly once (got T**2 scaling)"
 
 
 def test_flashinfer_temperature_one_is_unchanged(monkeypatch):
