@@ -40,6 +40,7 @@ class OpBackend(Enum, metaclass=_KernelEnumMeta):
     # Generic fallback
     TRITON_GENERIC = "rl_engine.kernels.ops.triton.generic.TritonOp"
     PYTORCH_NATIVE = "rl_engine.kernels.ops.pytorch.loss.logp.NativeLogpOp"
+    PYTORCH_NATIVE_ROPE = "rl_engine.kernels.ops.pytorch.rotary_embedding.rope.NativeRoPEOp"
 
 
 class KernelRegistry:
@@ -75,16 +76,19 @@ class KernelRegistry:
                 "attn": [OpBackend.FLASH_ATTN, OpBackend.TRITON_GENERIC, OpBackend.PYTORCH_NATIVE],
                 "grpo_loss": [OpBackend.TRITON_GRPO_LOSS, OpBackend.PYTORCH_GRPO_LOSS],
                 # Default dispatch logic for new operators
+                "rope": [OpBackend.PYTORCH_NATIVE_ROPE],
             },
             "rocm": {
                 "logp": [OpBackend.ROCM_AITER, OpBackend.TRITON_GENERIC, OpBackend.PYTORCH_NATIVE],
                 "attn": [OpBackend.TRITON_GENERIC, OpBackend.PYTORCH_NATIVE],
                 "grpo_loss": [OpBackend.TRITON_GRPO_LOSS, OpBackend.PYTORCH_GRPO_LOSS],
+                "rope": [OpBackend.PYTORCH_NATIVE_ROPE],
             },
             "cpu": {
                 "logp": [OpBackend.PYTORCH_NATIVE],
                 "attn": [OpBackend.PYTORCH_NATIVE],
                 "grpo_loss": [OpBackend.PYTORCH_GRPO_LOSS],
+                "rope": [OpBackend.PYTORCH_NATIVE_ROPE],
             },
         }
         logger.info(f"KernelRegistry initialized for {device_ctx.device_type}")
