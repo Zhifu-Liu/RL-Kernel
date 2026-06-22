@@ -10,7 +10,6 @@ import torch
 
 from rl_engine.kernels.ops.pytorch.linear.matmul import NativeMatmulOp
 
-
 QWEN3_HIDDEN = 4096
 QWEN3_INTERMEDIATE = 12288
 
@@ -82,9 +81,9 @@ class TestNativeMatmulOpBatchInvariance:
         full_out = op.forward_fp32(a, b)
         for row in range(a.shape[0]):
             single_out = op.forward_fp32(a[row : row + 1], b)
-            assert torch.equal(full_out[row], single_out[0]), (
-                f"Batch invariance broken at row {row}"
-            )
+            assert torch.equal(
+                full_out[row], single_out[0]
+            ), f"Batch invariance broken at row {row}"
 
     def test_batch_invariance_with_padding(self):
         op = NativeMatmulOp()
@@ -114,8 +113,7 @@ class TestNativeMatmulOpAccuracy:
         out_fp32 = op.forward_fp32(a, b)
         diff = (out_typed - out_fp32).abs().max().item()
         assert torch.allclose(out_typed, out_fp32, atol=atol, rtol=rtol), (
-            f"dtype={dtype}, max_abs_error={diff:.3e} exceeds "
-            f"atol={atol}, rtol={rtol}"
+            f"dtype={dtype}, max_abs_error={diff:.3e} exceeds " f"atol={atol}, rtol={rtol}"
         )
 
 
