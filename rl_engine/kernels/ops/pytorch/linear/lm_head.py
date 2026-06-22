@@ -30,7 +30,6 @@ class NativeLMHeadOp:
     (each output row reduces over ``hidden`` independently of the batch).
     """
 
-    op_class = "reduction"
 
     def __init__(self) -> None:
         """No state; the op is a pure function over (hidden, weight, bias)."""
