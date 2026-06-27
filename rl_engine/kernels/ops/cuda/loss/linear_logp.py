@@ -136,7 +136,7 @@ class _FusedTensorParallelLinearLogpSM90Function(torch.autograd.Function):
             local_vocab_size=weight.size(0),
             global_vocab_size=global_vocab_size,
         )
-        _validate_global_targets(target_1d, global_vocab_size)
+        _validate_global_targets(target_1d, global_vocab_size, tp_group)
 
         local_vocab = weight.size(0)
         local_target = target_1d - vocab_start_index

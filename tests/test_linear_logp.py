@@ -2,8 +2,9 @@
 # Copyright (c) 2026 RL-Kernel Contributors
 
 import queue
-import socket
+import tempfile
 import traceback
+from pathlib import Path
 
 import pytest
 import torch
@@ -58,12 +59,6 @@ requires_gloo = pytest.mark.skipif(
     not _gloo_available(),
     reason="tensor-parallel linear_logp CPU test requires torch.distributed Gloo.",
 )
-
-
-def _find_free_tcp_port():
-    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
-        sock.bind(("127.0.0.1", 0))
-        return sock.getsockname()[1]
 
 
 def _tp_linear_logp_gloo_worker(rank, world_size, init_method, result_queue):
@@ -386,38 +381,41 @@ def test_tensor_parallel_metadata_requires_multi_rank_group():
 def test_native_tensor_parallel_matches_full_reference_cpu_gloo_4_ranks():
     ctx = mp.get_context("spawn")
     world_size = 4
-    init_method = f"tcp://127.0.0.1:{_find_free_tcp_port()}"
-    result_queue = ctx.Queue()
-    processes = [
-        ctx.Process(
-            target=_tp_linear_logp_gloo_worker,
-            args=(rank, world_size, init_method, result_queue),
-        )
-        for rank in range(world_size)
-    ]
+    with tempfile.TemporaryDirectory() as tmpdir:
+        init_method = (Path(tmpdir) / "gloo_init").as_uri()
+        result_queue = ctx.Queue()
+        processes = [
+            ctx.Process(
+                target=_tp_linear_logp_gloo_worker,
+                args=(rank, world_size, init_method, result_queue),
+            )
+            for rank in range(world_size)
+        ]
 
-    for process in processes:
-        process.start()
-
-    results = []
-    try:
-        for _ in processes:
-            results.append(result_queue.get(timeout=45))
-    except queue.Empty:
         for process in processes:
-            if process.is_alive():
-                process.terminate()
-        pytest.fail("timed out waiting for tensor-parallel Gloo workers")
-    finally:
-        for process in processes:
-            process.join(timeout=10)
-            if process.is_alive():
-                process.terminate()
+            process.start()
 
+        results = []
+        try:
+            for _ in processes:
+                results.append(result_queue.get(timeout=45))
+        except queue.Empty:
+            for process in processes:
+                if process.is_alive():
+                    process.terminate()
+            pytest.fail("timed out waiting for tensor-parallel Gloo workers")
+        finally:
+            for process in processes:
+                process.join(timeout=10)
+                if process.is_alive():
+                    process.terminate()
+
+    sorted_results = sorted(results, key=lambda item: item["rank"])
+    for result in sorted_results:
+        assert result["ok"], result.get("traceback")
     for process in processes:
         assert process.exitcode == 0
-    for result in sorted(results, key=lambda item: item["rank"]):
-        assert result["ok"], result.get("traceback")
+    for result in sorted_results:
         assert result["out"] < 1e-5
         assert result["hidden_grad"] < 1e-5
         assert result["weight_grad"] < 1e-5

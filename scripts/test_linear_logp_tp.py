@@ -389,10 +389,20 @@ def run_stress(args, rank: int, world_size: int, device: torch.device, op: Any) 
         loss.backward()
         return out
 
-    _reset_peak_memory(device)
-    elapsed_ms = _time_block(device, step)
+    stress_out = None
 
-    finite_tensor = torch.isfinite(hidden.grad).all() & torch.isfinite(local_weight.grad).all()
+    def timed_step() -> None:
+        nonlocal stress_out
+        stress_out = step()
+
+    _reset_peak_memory(device)
+    elapsed_ms = _time_block(device, timed_step)
+
+    finite_tensor = (
+        torch.isfinite(stress_out).all()
+        & torch.isfinite(hidden.grad).all()
+        & torch.isfinite(local_weight.grad).all()
+    )
     if local_bias is not None:
         finite_tensor = finite_tensor & torch.isfinite(local_bias.grad).all()
     finite = _reduce_min_int(bool(finite_tensor.item()), device)

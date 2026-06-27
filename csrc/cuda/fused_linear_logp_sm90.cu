@@ -113,11 +113,11 @@ __global__ void fused_linear_logp_sm90_kernel(const __grid_constant__ CUtensorMa
     auto issue_load = [&](int k, int col_base) {
         const int buf = k % STAGES;
         const int k_off = k * BK;
+        mbarrier_arrive_expect_tx(mbar[buf], tile_bytes);
         tma_2d_g2s(sH_base_tma + buf * BM * BK * sizeof(nv_bfloat16), &h_tmap, k_off, row_base,
                    mbar[buf]);
         tma_2d_g2s(sW_base_tma + buf * BN * BK * sizeof(nv_bfloat16), &w_tmap, k_off, col_base,
                    mbar[buf]);
-        mbarrier_arrive_expect_tx(mbar[buf], tile_bytes);
     };
 
     int phase[STAGES];

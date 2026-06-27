@@ -62,14 +62,15 @@ def should_use_tensor_parallel_linear_logp(
     local_vocab_size: int,
 ) -> bool:
     """Whether a linear_logp call describes a vocab-parallel weight shard."""
-    if local_vocab_size <= 0:
-        raise ValueError("lm_head_weight must contain at least one vocab row.")
-
     explicit_tp = tp_group is not None or vocab_start_index != 0 or global_vocab_size is not None
+    if local_vocab_size <= 0 and not explicit_tp:
+        raise ValueError("lm_head_weight must contain at least one vocab row.")
     if not explicit_tp:
         return False
 
     world_size = _tensor_parallel_world_size(tp_group)
+    if local_vocab_size <= 0 and world_size <= 1:
+        raise ValueError("lm_head_weight must contain at least one vocab row.")
     if world_size <= 1:
         if vocab_start_index != 0:
             raise ValueError("vocab_start_index requires a tensor-parallel group.")
@@ -108,20 +109,54 @@ def _validate_tp_vocab_partition(
         expected_start = end
 
     covered_vocab_size = expected_start
-    if global_vocab_size is None:
-        return covered_vocab_size
-    if int(global_vocab_size) != covered_vocab_size:
+    global_size = torch.tensor(
+        [0, 0 if global_vocab_size is None else int(global_vocab_size)],
+        device=device,
+        dtype=torch.long,
+    )
+    global_sizes_t = [torch.empty_like(global_size) for _ in range(dist.get_world_size(tp_group))]
+    dist.all_gather(global_sizes_t, global_size, group=tp_group)
+    invalid_sizes = [
+        int(value[1].item())
+        for value in global_sizes_t
+        if int(value[0].item()) and int(value[1].item()) != covered_vocab_size
+    ]
+    if invalid_sizes:
         raise ValueError(
             "global_vocab_size must match the TP vocab partition size: "
-            f"got {global_vocab_size}, covered {covered_vocab_size}."
+            f"got {invalid_sizes[0]}, covered {covered_vocab_size}."
         )
-    return int(global_vocab_size)
+    return covered_vocab_size if global_vocab_size is None else int(global_vocab_size)
 
 
-def _validate_global_targets(target_1d: torch.Tensor, global_vocab_size: int) -> None:
+def _validate_global_targets(
+    target_1d: torch.Tensor,
+    global_vocab_size: int,
+    tp_group: Any = None,
+) -> None:
     invalid = (target_1d < 0) | (target_1d >= global_vocab_size)
-    if bool(invalid.any().item()):
+    local_invalid = bool(invalid.any().item())
+    if tp_group is not None:
+        dist = _require_distributed_initialized()
+        invalid_flag = torch.tensor(int(local_invalid), device=target_1d.device, dtype=torch.int32)
+        dist.all_reduce(invalid_flag, op=dist.ReduceOp.MAX, group=tp_group)
+        if target_1d.numel():
+            min_target = torch.tensor(
+                int(target_1d.min().item()), device=target_1d.device, dtype=torch.long
+            )
+            max_target = torch.tensor(
+                int(target_1d.max().item()), device=target_1d.device, dtype=torch.long
+            )
+        else:
+            min_target = torch.tensor(global_vocab_size, device=target_1d.device, dtype=torch.long)
+            max_target = torch.tensor(-1, device=target_1d.device, dtype=torch.long)
+        dist.all_reduce(min_target, op=dist.ReduceOp.MIN, group=tp_group)
+        dist.all_reduce(max_target, op=dist.ReduceOp.MAX, group=tp_group)
+        local_invalid = bool(invalid_flag.item())
+        t_min, t_max = int(min_target.item()), int(max_target.item())
+    elif local_invalid:
         t_min, t_max = int(target_1d.min().item()), int(target_1d.max().item())
+    if local_invalid:
         raise ValueError(
             f"target_ids out of range: expected [0, {global_vocab_size - 1}], "
             f"got [{t_min}, {t_max}]. Mask or filter padding / ignore-index values "
@@ -208,7 +243,7 @@ class _TensorParallelLinearLogpFunction(torch.autograd.Function):
             local_vocab_size=weight.size(0),
             global_vocab_size=global_vocab_size,
         )
-        _validate_global_targets(target_1d, global_vocab_size)
+        _validate_global_targets(target_1d, global_vocab_size, tp_group)
 
         local_max, local_sum, local_target_logit, owner_count = _chunked_local_linear_logp_stats(
             hidden_2d,
@@ -326,9 +361,10 @@ def tensor_parallel_linear_logp(
             f"device {hidden.device}"
         )
     if bias is not None:
-        if bias.numel() != lm_head_weight.size(0):
+        if bias.ndim != 1 or bias.numel() != lm_head_weight.size(0):
             raise ValueError(
-                f"bias must have local V={lm_head_weight.size(0)} elements, got {bias.numel()}"
+                f"bias must be 1-D with local V={lm_head_weight.size(0)} elements, "
+                f"got shape {tuple(bias.shape)}"
             )
         if bias.device != hidden.device:
             raise ValueError(f"bias device {bias.device} must match hidden device {hidden.device}")
