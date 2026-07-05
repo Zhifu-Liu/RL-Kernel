@@ -11,40 +11,13 @@
 <p align="center">
   <a href="https://rl-align.github.io/RL-Kernel/"><img src="https://img.shields.io/badge/Documentation-Docs-2ea44f" alt="Documentation"></a>
   <a href="https://discord.gg/RGUQrr74z"><img src="https://img.shields.io/badge/Discord-Join%20Us-5865F2?logo=discord&logoColor=white" alt="Discord"></a>
-  <a href="./docs/assets/wechat-group-2.png"><img src="https://img.shields.io/badge/WeChat-Join%20Group-07C160?logo=wechat&logoColor=white" alt="WeChat"></a>
+  <a href="./docs/community/wechat.md"><img src="https://img.shields.io/badge/WeChat-Join%20Group-07C160?logo=wechat&logoColor=white" alt="WeChat"></a>
   <a href="./docs/assets/whatsapp-group.png"><img src="https://img.shields.io/badge/WhatsApp-Join%20Group-25D366?logo=whatsapp&logoColor=white" alt="WhatsApp"></a>
   <a href="https://deepwiki.com/RL-Align/RL-Kernel"><img src="https://img.shields.io/badge/Ask-DeepWiki-7B3FE4" alt="Ask DeepWiki"></a>
   <a href="https://github.com/RL-Align/RL-Kernel"><img src="https://img.shields.io/badge/Hardware-NVIDIA%20CUDA%20%7C%20AMD%20ROCm-orange" alt="Hardware"></a>
   <a href="https://opensource.org/licenses/Apache-2.0"><img src="https://img.shields.io/badge/License-Apache%202.0-blue.svg" alt="License"></a>
-  <br />
-  <sub>WeChat group QR expired? Scan a team member’s WeChat QR code below and add the note <strong><code>RL-Kernel community group</code></strong>; we’ll invite you in.</sub>
 </p>
 
-<details align="center">
-<summary>Team members’ WeChat QR codes</summary>
-
-<br />
-
-<table align="center">
-  <tr>
-    <td align="center">
-      <img src="./docs/assets/wechat-contact-1.png" alt="RL-Kernel WeChat contact 1" width="180"><br />
-      <sub>RL-Kernel Team Member</sub>
-    </td>
-    <td align="center">
-      <img src="./docs/assets/wechat-contact-2.png" alt="RL-Kernel WeChat contact 2" width="180"><br />
-      <sub>RL-Kernel Team Member</sub>
-    </td>
-    <td align="center">
-      <img src="./docs/assets/wechat-contact-3.png" alt="RL-Kernel WeChat contact 3" width="180"><br />
-      <sub>RL-Kernel Team Member</sub>
-    </td>
-  </tr>
-</table>
-
-</details>
-
-<br />
 
 **RL-Kernel** is a high-performance, memory-efficient infrastructure for Reinforcement Learning post-training. It eliminates the memory and latency bottlenecks in Large Language Model alignment, This project targets AI infrastructure engineers, algorithm researchers, and enterprise-level large model alignment scenarios, providing specialized kernels for algorithms like **GRPO**, **PPO**, and **DPO**.
 
