@@ -9,15 +9,11 @@ PRIMARY_GPU_COUNT="${PRIMARY_GPU_COUNT:-${GPU_COUNT:-2}}"
 FALLBACK_GPU_ID="${FALLBACK_GPU_ID:-NVIDIA A40}"
 FALLBACK_GPU_COUNT="${FALLBACK_GPU_COUNT:-1}"
 
-# Optional explicit compile target (e.g. "9.0" or "90"). When set it is treated as
-# an ASSERTION: the provisioned pod must actually be this arch (checked on the pod in
-# the remote build block), so a cross-architecture resource fallback fails fast rather
-# than silently compiling+launching mismatched SASS.
+# Optional arch override; asserted against the pod's real cap in the remote build so a
+# cross-arch resource fallback cannot build mismatched SASS.
 TARGET_SM="${TARGET_SM:-}"
 
-# Set to 1 (e.g. from an sm90+ matrix job) to compile the Hopper TMA/WGMMA kernels.
-# Forwarded into the remote pod build below; setup.py only builds them when this is "1",
-# so without forwarding it an H100 job would silently skip the Hopper kernels.
+# Forwarded to the remote build; setup.py compiles the Hopper (sm90) kernels only when "1".
 KERNEL_ALIGN_FORCE_SM90="${KERNEL_ALIGN_FORCE_SM90:-}"
 
 CI_IMAGE="${CI_IMAGE:-runpod/pytorch:2.4.0-py3.11-cuda12.4.1-devel-ubuntu22.04}"
@@ -140,13 +136,9 @@ fi
 echo "[remote] Using interpreter: $PY"
 export FORCE_CUDA=1
 export MAX_JOBS=8
-# Forward the Hopper-kernel build flag from the host (matrix) into the pod build, so
-# setup.py actually compiles the sm90 TMA/WGMMA kernels when an sm90+ job requests them.
 export KERNEL_ALIGN_FORCE_SM90="'"${KERNEL_ALIGN_FORCE_SM90}"'"
 
-# --- Determine the compile architecture (replaces the hardcoded sm_86) ---
-# Normalize a compact (e.g. 90) or dotted (e.g. 9.0) compute cap to torch dotted
-# form, preserving an optional +PTX suffix.
+# normalize_sm: compact (90) or dotted (9.0) compute cap -> torch dotted form, keeping +PTX.
 normalize_sm() {
   sm_in="$1"; sm_ptx=""
   case "$sm_in" in *+PTX) sm_ptx="+PTX"; sm_in="${sm_in%+PTX}";; esac
@@ -158,7 +150,6 @@ normalize_sm() {
   case "$sm_in" in [0-9]*.[0-9]|[0-9]*.[0-9][0-9]) echo "${sm_in}${sm_ptx}" ;; *) return 1 ;; esac
 }
 
-# The pod always has a GPU during CI, so detect its real compute capability.
 ACTUAL_SM=$(nvidia-smi --query-gpu=compute_cap --format=csv,noheader 2>/dev/null | head -1 | tr -d "[:space:]")
 [ -z "$ACTUAL_SM" ] && ACTUAL_SM=$("$PY" -c "import torch;a,b=torch.cuda.get_device_capability();print(f\"{a}.{b}\")" 2>/dev/null || true)
 [ -z "$ACTUAL_SM" ] && { echo "[remote] FATAL: cannot determine GPU compute capability"; exit 3; }
@@ -176,8 +167,7 @@ if [ -n "$REQUESTED_SM" ]; then
 else
   BUILD_SM=$(normalize_sm "$ACTUAL_SM") || { echo "[remote] FATAL: unsupported detected arch $ACTUAL_SM"; exit 3; }
 fi
-# BUILD_SM is always a bare arch here (the REQUESTED path strips +PTX and detection
-# returns a bare cap), so append +PTX unconditionally for forward-compat JIT.
+# BUILD_SM is always bare here (both paths strip +PTX); +PTX gives forward-compat JIT.
 export TORCH_CUDA_ARCH_LIST="${BUILD_SM}+PTX"
 echo "[remote] Detected GPU sm_$ACTUAL_SM; building _C for TORCH_CUDA_ARCH_LIST=$TORCH_CUDA_ARCH_LIST"
 
@@ -187,28 +177,20 @@ cd repo
 git fetch origin '"${PR_SHA}"'
 git checkout --detach '"${PR_SHA}"'
 "$PY" -c "import torch;print(f\"[remote] image torch {torch.__version__} cuda {torch.version.cuda}\")"
-# --- Deterministic torch + build order (review: KJLdefeated) ---
-# Pin the exact torch used to BOTH compile the extension and run the tests, so the build is
-# reproducible and the compiled ABI always matches the runtime torch. Otherwise the image
-# ships torch 2.4.0 while the project floor is >=2.4.1, so a bare pip install -e . would
-# non-deterministically upgrade torch (possibly to a CUDA build that mismatches the pod).
-# Keep the CUDA tag in TORCH_INDEX_URL (cu124) in sync with the CI image.
+# Pin torch (cu124, matching the CI image) so the extension is built against the exact
+# runtime torch, not a non-deterministic bare-install upgrade of the 2.4.0 in the image.
 TORCH_SPEC="${TORCH_SPEC:-torch==2.4.1}"
 TORCH_INDEX_URL="${TORCH_INDEX_URL:-https://download.pytorch.org/whl/cu124}"
 "$PY" -m pip install --no-cache-dir "$TORCH_SPEC" --index-url "$TORCH_INDEX_URL"
 "$PY" -c "import torch;print(f\"[remote] pinned torch {torch.__version__} cuda {torch.version.cuda}\")"
-# --no-build-isolation: make torch visible to setup.py (else PEP 517 isolation hides it and
-#   get_extensions() returns [] so the _C extension is never built = the reported _C=None bug).
-# --no-deps: do NOT let pip re-resolve/upgrade torch during the editable install, keeping the
-#   build order deterministic (pinned torch -> compile -> runtime deps installed explicitly).
+# --no-build-isolation: torch must be visible to setup.py, else the extension is silently skipped.
+# --no-deps: keep the pinned torch; do not let the editable install re-resolve it.
 "$PY" -m pip install --no-build-isolation --no-deps -e .
 "$PY" -m pip install --no-cache-dir numpy tabulate accelerate transformers pytest
 nvidia-smi
-# Fail fast: verify _C actually built AND launches on this GPU, instead of silently
-# falling back to native kernels (which would leave GPU CI green while testing nothing).
+# Fail fast if _C did not build or cannot launch, instead of silently using native fallbacks.
 "$PY" scripts/ci_smoke.py
-# The build above compiled and smoke-tested _C, so enforce its presence in the pytest
-# suite too (tests/test_extension_smoke.py skips unless this is set).
+# Enforce _C in the pytest suite too (test_extension_smoke.py skips unless this is set).
 export RL_KERNEL_REQUIRE_EXT=1
 '"${TEST_CMD}"
 
