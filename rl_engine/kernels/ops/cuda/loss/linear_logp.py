@@ -45,9 +45,8 @@ def _fused_bwd_precision() -> str:
 
 
 def _sm90_fused_backward_tf32_enabled() -> bool:
-    return (
-        _fused_bwd_precision() != "fp32"
-        and not _env_disabled("RL_KERNEL_LINEAR_LOGP_FUSED_BWD_TF32")
+    return _fused_bwd_precision() != "fp32" and not _env_disabled(
+        "RL_KERNEL_LINEAR_LOGP_FUSED_BWD_TF32"
     )
 
 
@@ -115,7 +114,9 @@ def _log_sm90_save_probs_bf16_skip_once(
     *, tp_path: bool, details: dict[str, Any] | None = None, **conditions: bool
 ) -> None:
     global _SM90_SAVE_PROBS_BF16_SKIP_LOGGED
-    if _SM90_SAVE_PROBS_BF16_SKIP_LOGGED or not _env_enabled("RL_KERNEL_LINEAR_LOGP_SAVE_PROBS_BF16"):
+    if _SM90_SAVE_PROBS_BF16_SKIP_LOGGED or not _env_enabled(
+        "RL_KERNEL_LINEAR_LOGP_SAVE_PROBS_BF16"
+    ):
         return
     failed = [name for name, ok in conditions.items() if not ok]
     logger.info(
@@ -270,7 +271,9 @@ class _TensorParallelLinearLogpSaveProbsBF16Function(torch.autograd.Function):
     """
 
     @staticmethod
-    def forward(ctx, hidden, lm_head_weight, target_ids, vocab_start_index, global_vocab_size, tp_group):
+    def forward(
+        ctx, hidden, lm_head_weight, target_ids, vocab_start_index, global_vocab_size, tp_group
+    ):
         hidden_2d = hidden.reshape(-1, hidden.size(-1)).contiguous()
         weight = lm_head_weight.contiguous()
         target_1d = (
@@ -423,7 +426,9 @@ class _TensorParallelLinearLogpFusedTileBF16Function(torch.autograd.Function):
     """TP cuBLAS bf16 logits forward + tiled local backward."""
 
     @staticmethod
-    def forward(ctx, hidden, lm_head_weight, target_ids, vocab_start_index, global_vocab_size, tp_group):
+    def forward(
+        ctx, hidden, lm_head_weight, target_ids, vocab_start_index, global_vocab_size, tp_group
+    ):
         hidden_2d = hidden.reshape(-1, hidden.size(-1)).contiguous()
         weight = lm_head_weight.contiguous()
         target_1d = (
@@ -864,12 +869,7 @@ class FusedLinearLogpSM90Op:
             weight_requires_grad = lm_head_weight.requires_grad
             any_grad_required = hidden_requires_grad or weight_requires_grad
             output_only_grad = hidden_no_grad and weight_requires_grad
-            if (
-                save_probs_tp_available
-                and sm90_supported
-                and bias_none
-                and output_only_grad
-            ):
+            if save_probs_tp_available and sm90_supported and bias_none and output_only_grad:
                 if not _SM90_SAVE_PROBS_BF16_PATH_LOGGED:
                     logger.info(
                         "Using save-probs bf16 output-only tensor-parallel linear_logp fast path."
@@ -895,15 +895,8 @@ class FusedLinearLogpSM90Op:
                 any_grad_required=any_grad_required,
                 output_only_grad=output_only_grad,
             )
-            fused_tile_forward_available = _sm90_fused_tile_bf16_forward_available(
-                tp_path=True
-            )
-            if (
-                fused_tile_forward_available
-                and sm90_supported
-                and bias_none
-                and any_grad_required
-            ):
+            fused_tile_forward_available = _sm90_fused_tile_bf16_forward_available(tp_path=True)
+            if fused_tile_forward_available and sm90_supported and bias_none and any_grad_required:
                 if not _SM90_FUSED_TILE_BF16_PATH_LOGGED:
                     logger.info(
                         "Using fused-tile bf16 %stensor-parallel linear_logp fast path.",
@@ -952,11 +945,7 @@ class FusedLinearLogpSM90Op:
         hidden_requires_grad = hidden.requires_grad
         weight_requires_grad = lm_head_weight.requires_grad
         any_grad_required = hidden_requires_grad or weight_requires_grad
-        if (
-            save_probs_available
-            and bias_none
-            and any_grad_required
-        ):
+        if save_probs_available and bias_none and any_grad_required:
             if not _SM90_SAVE_PROBS_BF16_PATH_LOGGED:
                 logger.info(
                     "Using save-probs bf16 %slinear_logp fast path.",
@@ -974,14 +963,8 @@ class FusedLinearLogpSM90Op:
             weight_requires_grad=weight_requires_grad,
             any_grad_required=any_grad_required,
         )
-        fused_tile_forward_available = _sm90_fused_tile_bf16_forward_available(
-            tp_path=False
-        )
-        if (
-            fused_tile_forward_available
-            and bias_none
-            and any_grad_required
-        ):
+        fused_tile_forward_available = _sm90_fused_tile_bf16_forward_available(tp_path=False)
+        if fused_tile_forward_available and bias_none and any_grad_required:
             if not _SM90_FUSED_TILE_BF16_PATH_LOGGED:
                 logger.info(
                     "Using fused-tile bf16 %slinear_logp fast path.",
